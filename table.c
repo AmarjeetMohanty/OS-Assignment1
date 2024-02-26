@@ -1,173 +1,145 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include<stdio.h>
+#include<unistd.h>
+#include<sys/types.h>
+#include<sys/wait.h>
+#include<sys/shm.h>
+#include<fcntl.h>
+#include<string.h>
+
+#define MAX_TABLES 10
+
+typedef struct {
+    int itemNumber;
+    char itemName[500];
+    int quantity} Order;
+/* 
+In this context, Order** orders; is being used to create a dynamic two-dimensional array. Here's how it works:
+
+The first level of indirection (*) is used to create an array of pointers. Each of these pointers can be thought of as representing a customer at the table.
+
+The second level of indirection (**) is used to make each of these pointers point to another array. Each of these second arrays represents the orders placed by a particular customer.
+
+So, in essence, Order** orders; creates a table where each row represents a customer and each column in a row represents an order placed by that customer.
+
+The Order structure would typically contain details about each order, such as the food item ordered, the quantity, and perhaps other details like special instructions for the order.
+
+This structure allows for flexibility in the number of customers and the number of orders per customer, as these can be dynamically allocated and deallocated at runtime. This wouldn't be possible with a regular two-dimensional array, which requires the size to be known at compile time.
+*/
+
+typedef struct {
+    int tableNumber;
+    int numCustomer;
+    Order** orders;
+} Table;
+
 #include <unistd.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <string.h>
-#include <sys/types.h>
-#include <fcntl.h>
-#include <sys/wait.h>
-#include <signal.h>
 
-typedef struct
-{
-    int serial_number;
-    char name[50];
-    float price;
-} MenuItem;
+void create_customer_process(int num_customers, int table_number) {
+    // TODO: Create customer processes and pipes for IPC
+    int i;
+    int pipefd[num_customers][2]; // Array of pipes
 
-int readMenu(const char *filename, MenuItem menu[], int *itemCount)
-{
-    FILE *file;
-    char line[100];
-    int serialNumber;
-    char itemName[50];
-    float price;
+    for (i = 0; i < num_customers; i++) {
+        if (pipe(pipefd[i]) == -1) {
+            perror("Pipe creation failed");
+            exit(1);
+        }
 
-    file = fopen(filename, "r");
-    if (file == NULL)
-    {
-        perror("Error opening file");
-        return 0; // Return 0 to indicate failure
-    }
-
-    while (fgets(line, sizeof(line), file))
-    {
-        serialNumber = 0;
-        memset(itemName, 0, sizeof(itemName));
-        price = 0.0f;
-
-        char *token = strtok(line, ".");
-        if (token != NULL)
-        {
-            serialNumber = atoi(token);
-            token = strtok(NULL, "INR");
-            if (token != NULL)
-            {
-                sscanf(token, "%49[^0-9] %f", itemName, &price);
-                menu[*itemCount].serial_number = serialNumber;
-                strncpy(menu[*itemCount].name, itemName, sizeof(menu[*itemCount].name) - 1);
-                menu[*itemCount].price = price;
-                (*itemCount)++;
-            }
+        int pid = fork();
+        if (pid == 0) {
+            // Child process
+            printf("Customer %d is ordering\n", i);
+            close(pipefd[i][0]); // Close the read end of the pipe
+            // TODO: Write customer's order to the pipe
+            exit(0);
+        } else if (pid < 0) {
+            perror("Fork failed");
+            exit(1);
         }
     }
 
+    for (i = 0; i < num_customers; i++) {
+        close(pipefd[i][1]); // Close the write end of the pipe
+        wait(NULL);
+    }
+}
+
+void read_menu_and_display() {
+    // TODO: Read menu.txt and display the menu
+    FILE* file = fopen("menu.txt", "r");
+    char line[500];
+    while(fgets(line, 500, file)){
+        printf("%s", line);
+    }
     fclose(file);
-    return 1; // Return 1 to indicate success
+    
 }
 
-void displayMenu(const MenuItem menu[], int itemCount)
-{
-    printf("Menu:\n");
-    for (int i = 0; i < itemCount; i++)
-    {
-        printf("%d. %s %.2f INR\n", menu[i].serial_number, menu[i].name, menu[i].price);
-    }
-}
-
-int isValidOrder(const int order[], int size, const MenuItem menu[], int itemCount)
-{
-
-    for (int i = 0; i < size; i++)
-    {
-        int found = 0;
-        for (int j = 0; j < itemCount; j++)
-        {
-            if (order[i] == menu[j].serial_number)
-            {
-                found = 1;
-                break; // Break out of inner loop if a match is found
+void take_orders_from_customers(int num_customers, int table_number) {
+    // TODO: Take orders from customers
+    /*
+    1. Veg Burger 30 INR
+    2. Chicken Burger 40 INR
+    3. Ostrich Eggs 25 INR
+    4. Egg Frankie 30 INR
+    */
+   // Customer keeps inputing the order index until he presses -1 keep taking order
+    int order;
+    int i;
+    for(i = 0; i < num_customers; i++){
+        // Enter the serial number(s) of  the item(s) to order from the emnu . Enter -1 when done
+        printf("Enter the serial number(s) of  the item(s) to order from the nemu . Enter -1 when done\n");
+        while(1){
+            scanf("%d", &order);
+            if(order == -1){
+                break;
             }
+            Table* tables[MAX_TABLES]; // Declare the "tables" variable
+            
+            tables[table_number]->orders[i] = (Order*)malloc(sizeof(Order));
+            tables[table_number]->orders[i]->itemNumber = order;
+            tables[table_number]->orders[i]->quantity = 1;
         }
-        if (!found)
-        {
-            return 0; // Return false if no matching serial number is found for the current order item
-        }
+            
     }
-    return 1; // Return true if all order items match a serial number
+        
 }
 
-int main()
-{
+void communicate_order_to_waiter(Table *table) {
+    // TODO: Communicate the order to the waiter process using shared memory
+    int shmid;
 
-    int table_id;
-    printf("Enter Table Number: ");
-    scanf("%d", &table_id);
-
-    MenuItem menu[100]; // Menu array
-    int itemCount = 0;  // Number of items in the menu
-
-    const char *filename = "menu.txt"; // File containing the menu
-
-    // Read menu items from file
-    if (!readMenu(filename, menu, &itemCount))
-    {
-        fprintf(stderr, "Failed to read menu from %s\n", filename);
-        return -1;
-    }
-
-    key_t table_key = ftok(".", table_id);
-    if (table_key == -1)
-    {
-        perror("ftok1");
-        exit(1);
-    }
-
-    int table_shm_id = shmget(table_key, sizeof(int) * 6 * 256, IPC_CREAT | 0666);
-    if (table_shm_id == -1)
-    {
-        perror("shmget");
-        exit(1);
-    }
-
-    int(*shared_order)[6][256];
-
-    shared_order = (int(*)[6][256])shmat(table_shm_id, NULL, 0);
-    if (shared_order == (void *)-1)
-    {
-        perror("shmat");
-        exit(1);
-    }
-
-    printf("Enter the number of customers: ");
-    int num_customers;
-    scanf("%d", &num_customers);
-
-    (*shared_order)[0][0] = num_customers; // the (0,0) of the shared memory will have numCustomers, you will need to access numcustomers in waiter table
-                                        // the first row of the shared memory can be used as a flag register to communicate between waiter and table
-                                        // order of the ith customer will be stored in (i+1)th row
-
-    for (int i = 0; i < num_customers; i++)
-    {
-        int order[256];
-        int srNo;
-        scanf("%d", &srNo);
-        int idx;
-        while (srNo != -1)
-        {
-            order[idx++] = srNo;
-            scanf("%d", &srNo);
-        }
-        (*shared_order)[i+1][0] = num_customers; // the first index of the (i+1)th row in shared memory will indicate the number of items ith customer has order
-        for(int j = 1; j <= idx; j++){
-            (*shared_order)[i+1][j] = order[j-1];
-        }
-
-    }
-
-    if (shmdt(shared_order) == -1)
-    {
-        perror("shmdt");
-        exit(1);
-    }
-
-    if (shmctl(table_shm_id, IPC_RMID, NULL) == -1)
-    {
-        perror("shmctl");
-        exit(1);
-    }
-
-    printf("Table process terminated.\n");
-    return 0;
 }
+
+void receive_and_display_bill(Table *table) {
+    // TODO: Receive the total bill amount from the waiter process and display it
+}
+
+int main(){
+    int numTables = 0;
+    Table* tables[MAX_TABLES];
+    while(numTables< MAX_TABLES){
+        tables[numTables] = (Table*)malloc(sizeof(Table));
+        tables[numTables]->tableNumber = numTables;
+        tables[numTables]->numCustomer = 0;
+        tables[numTables]->orders = (Order**)malloc(sizeof(Order*));
+        numTables++;
+        int num_customers;
+        int table_number;
+        printf("Enter the number of customers: ");
+        scanf("%d", &num_customers);
+        printf("Enter the table number: ");
+        scanf("%d", &table_number);
+        //update the table with the number of customers
+        tables[table_number]->numCustomer = num_customers;
+        create_customer_process(num_customers, table_number);
+        read_menu_and_display();
+        take_orders_from_customers(num_customers, table_number);
+        communicate_order_to_waiter(tables[table_number]);
+        receive_and_display_bill(tables[table_number]);
+    }
+    
+}
+
+
+
