@@ -7,11 +7,12 @@
 #include<string.h>
 
 #define MAX_TABLES 10
+#define BUFF_SIZE 1024
 
 typedef struct {
     int itemNumber;
     char itemName[500];
-    int quantity} Order;
+    } Order;
 /* 
 In this context, Order** orders; is being used to create a dynamic two-dimensional array. Here's how it works:
 
@@ -98,7 +99,7 @@ void take_orders_from_customers(int num_customers, int table_number) {
             
             tables[table_number]->orders[i] = (Order*)malloc(sizeof(Order));
             tables[table_number]->orders[i]->itemNumber = order;
-            tables[table_number]->orders[i]->quantity = 1;
+            
         }
             
     }
@@ -108,12 +109,69 @@ void take_orders_from_customers(int num_customers, int table_number) {
 void communicate_order_to_waiter(Table *table) {
     // TODO: Communicate the order to the waiter process using shared memory
     int shmid;
-
+    key_t key = ftok("waiter.c", table->tableNumber);
+    if (key == -1) {
+        perror("Error in ftok");
+        // Handle the error here
+        return 1;
+    }
+    int* shmPtr;
+    shmid = shmget(key, BUFF_SIZE, 0644|IPC_CREAT);
+    if (shmid == -1) {
+        perror("Error in shmget");
+        // Handle the error here
+        return 1;
+    }
+    shmPtr = shmat(shmid, (void*)0, 0);
+    if (shmPtr == (int*)-1) {
+        perror("Error in shmat");
+        // Handle the error here
+        return 1;
+    }
+    
+    // Write the order to the shared memory
+    int i;
+    for (i = 0; i < table->numCustomer; i++) {
+        sprintf(shmPtr, "%d", table->orders[i]->itemNumber);
+        shmPtr += strlen(shmPtr) + 1;
+    }
+    // Write a -1 to indicate the end of the order
+    sprintf(shmPtr, "-1");
+    shmdt(shmPtr);
+    return 0;
 }
 
 void receive_and_display_bill(Table *table) {
     // TODO: Receive the total bill amount from the waiter process and display it
+    int shmid;
+    key_t key = ftok("waiter.c", table->tableNumber);
+    if (key == -1) {
+        perror("Error in ftok");
+        // Handle the error here
+        return 1;
+    }
+    int* shmPtr;
+    shmid = shmget(key, BUFF_SIZE, 0644|IPC_CREAT);
+    if (shmid == -1) {
+        perror("Error in shmget");
+        // Handle the error here
+        return 1;
+    }
+    shmPtr = shmat(shmid, (void*)0, 0);
+    if (shmPtr == (int*)-1) {
+        perror("Error in shmat");
+        // Handle the error here
+        return 1;
+    }
+    // Read the bill amount from the shared memory
+    printf("The total bill amount is: %s\n", shmPtr);
+    shmdt(shmPtr);
+    shmctl(shmid, IPC_RMID, NULL);
+    return 0;
+
 }
+
+
 
 int main(){
     int numTables = 0;
